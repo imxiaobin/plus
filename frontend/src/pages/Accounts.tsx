@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Copy, KeyRound, Plus, RefreshCw, ShieldCheck, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, KeyRound, Plus, RefreshCw, ShieldCheck, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -525,6 +525,7 @@ export default function Accounts() {
 
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [authorizingId, setAuthorizingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
   const authorizeAccount = async (account: AccountListItem) => {
     if (account.sub2api_authorize_status === 'running' || authorizingId === account.id) return
@@ -590,6 +591,25 @@ export default function Accounts() {
       setTimeout(() => setCopiedId(null), 1500)
     } else {
       setError('复制失败')
+    }
+  }
+
+  const deleteAccount = async (account: AccountListItem) => {
+    if (deletingId === account.id) return
+    if (!window.confirm(`确定删除账号 ${account.email}？此操作不可撤销。`)) return
+    setDeletingId(account.id)
+    setError('')
+    try {
+      await apiFetch(`/accounts/${account.id}`, { method: 'DELETE' })
+      if (accounts.length === 1 && page > 1) {
+        setPage(value => value - 1)
+      } else {
+        await load()
+      }
+    } catch (err: any) {
+      setError(err?.message || '删除账号失败')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -735,6 +755,16 @@ export default function Accounts() {
                       >
                         <Copy className="h-3.5 w-3.5" />
                         {copiedId === account.id ? '已复制' : '复制'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletingId === account.id}
+                        onClick={() => void deleteAccount(account)}
+                        title="删除账号"
+                        className="inline-flex items-center gap-1 rounded border border-red-500/35 bg-[var(--bg-pane)]/40 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {deletingId === account.id ? '删除中' : '删除'}
                       </button>
                     </div>
                   </td>

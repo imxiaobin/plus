@@ -10,6 +10,8 @@ SUB2API_PUBLIC_DEFAULTS = {
     "sub2api_concurrency": "3",
     "sub2api_priority": "50",
     "sub2api_group_ids": "",
+    "sub2api_models": "",
+    "sub2api_model_mapping": "",
 }
 
 
@@ -42,6 +44,31 @@ class ConfigService:
         from application.sub2api_oauth import test_sub2api_connection
 
         return test_sub2api_connection(data)
+
+    def list_sub2api_groups(self, data: dict[str, str] | None = None) -> dict:
+        from application.sub2api_oauth import list_sub2api_groups
+
+        return list_sub2api_groups(data)
+
+    def list_sub2api_models(self, data: dict[str, str] | None = None) -> dict:
+        from application.sub2api_oauth import list_sub2api_models
+
+        return list_sub2api_models(data)
+
+    def monitor_sub2api_accounts(self) -> dict:
+        from application.sub2api_oauth import monitor_local_sub2api_accounts
+
+        return monitor_local_sub2api_accounts()
+
+    def preview_sol_terra_mapping(self) -> dict:
+        from application.sub2api_oauth import preview_sol_terra_mapping
+
+        return preview_sol_terra_mapping()
+
+    def apply_sol_terra_mapping(self, *, enable: bool) -> dict:
+        from application.sub2api_oauth import apply_sol_terra_mapping
+
+        return apply_sol_terra_mapping(enable=enable)
 
     def get_options(self) -> dict:
         platform_options = collect_platform_choice_options(

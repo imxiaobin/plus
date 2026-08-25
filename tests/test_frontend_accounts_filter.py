@@ -112,3 +112,13 @@ def test_accounts_page_has_sub2api_authorize_button_and_status():
     assert 'colSpan={7}' in source
     assert ">Sub2<" in source or "Sub2" in source
     assert "settings?tab=sub2api" in source
+
+
+def test_accounts_page_has_delete_button():
+    source = ACCOUNTS_TSX.read_text(encoding="utf-8")
+
+    assert "method: 'DELETE'" in source
+    assert "`/accounts/${account.id}`" in source
+    assert "确定删除账号" in source
+    assert ">删除<" in source or "删除" in source
+    assert "Trash2" in source

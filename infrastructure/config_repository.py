@@ -15,6 +15,8 @@ class ConfigRepository:
         "sub2api_concurrency",
         "sub2api_priority",
         "sub2api_group_ids",
+        "sub2api_models",
+        "sub2api_model_mapping",
     }
 
     def __init__(self, definitions: ProviderDefinitionsRepository | None = None):

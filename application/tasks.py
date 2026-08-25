@@ -1615,10 +1615,27 @@ def _execute_sub2api_oauth_task(payload: dict[str, Any], logger: TaskLogger) -> 
         logger.finish(TASK_STATUS_CANCELLED, error="任务已取消")
         return
     try:
+        from core.proxy_pool import proxy_pool
+
+        prefer_http_pool = proxy_pool.active_count() > 0
+        login_proxy = _resolve_refresh_login_proxy(
+            "",
+            logger=logger,
+            prefer_http_pool=prefer_http_pool,
+        )
+        rotate_callback = proxy_pool.get_next_static if prefer_http_pool else None
+        if prefer_http_pool:
+            logger.log(
+                f"Sub2API 授权使用 HTTP 代理池（{proxy_pool.active_count()} 条），"
+                "Cloudflare 挑战时自动换下一条",
+                event_type="progress",
+            )
         result = authorize_chatgpt_account_to_sub2api(
             account_id,
             log_fn=logger.log,
             cancel_check=logger.is_cancel_requested,
+            proxy=login_proxy,
+            proxy_rotate_callback=rotate_callback,
         )
     except Exception as exc:
         error = str(exc).strip() or exc.__class__.__name__

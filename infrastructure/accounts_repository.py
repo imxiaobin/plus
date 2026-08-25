@@ -346,3 +346,32 @@ class AccountsRepository:
                 )
             session.commit()
         return created
+
+    def list_sub2api_authorized(self, *, platform: str = "chatgpt") -> list[AccountRecord]:
+        normalized = str(platform or "").strip() or "chatgpt"
+        with Session(engine) as session:
+            sub2_id = func.json_extract(AccountOverviewModel.summary_json, "$.sub2_account_id")
+            statement = (
+                select(AccountModel)
+                .join(AccountOverviewModel, AccountOverviewModel.account_id == AccountModel.id)
+                .where(AccountModel.platform == normalized)
+                .where(sub2_id.isnot(None))
+                .where(sub2_id != "")
+                .order_by(AccountModel.updated_at.desc(), AccountModel.id.desc())
+            )
+            try:
+                models = session.exec(statement).all()
+            except Exception:
+                models = [
+                    model
+                    for model in session.exec(
+                        select(AccountModel).where(AccountModel.platform == normalized)
+                    ).all()
+                ]
+                records = self._load_records(session, models)
+                return [
+                    item
+                    for item in records
+                    if str((item.overview or {}).get("sub2_account_id") or "").strip()
+                ]
+            return self._load_records(session, models)

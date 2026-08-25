@@ -29,6 +29,9 @@ from platforms.chatgpt.protocol_register import (
     _authorization_page_type,
     _is_cloudflare_challenge_response,
     _oauth_callback_target,
+    _OAUTH_INIT_MAX_ATTEMPTS,
+    _OAUTH_INIT_RETRY_BASE_SECONDS,
+    _OAUTH_INIT_RETRY_MAX_SECONDS,
     _raise_if_explicit_account_ban,
     _response_error,
     _response_json,
@@ -186,14 +189,22 @@ class Sub2ApiCodexLogin:
         log_fn: Callable[[str], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
         register: ChatGPTProtocolRegister | None = None,
+        proxy_rotate_callback: Callable[[], str | None] | None = None,
     ):
         self.log = log_fn or (lambda _message: None)
-        self.register = register or ChatGPTProtocolRegister(
-            proxy=proxy,
-            totp_secret=totp_secret,
-            log_fn=self.log,
-            cancel_check=cancel_check,
-        )
+        if register is not None:
+            self.register = register
+        else:
+            from platforms.chatgpt.credential_checks import _next_protocol_login_profile
+
+            self.register = ChatGPTProtocolRegister(
+                proxy=proxy,
+                totp_secret=totp_secret,
+                log_fn=self.log,
+                cancel_check=cancel_check,
+                proxy_rotate_callback=proxy_rotate_callback,
+                profile=_next_protocol_login_profile(),
+            )
         if totp_secret:
             self.register.totp_secret = str(totp_secret).strip()
 
@@ -244,6 +255,51 @@ class Sub2ApiCodexLogin:
         identity_value = str(identity or "").strip()
         if not identity_value or not str(password or ""):
             raise Sub2ApiLoginError("授权需要账号和密码")
+        last_error: Exception | None = None
+        for attempt in range(1, _OAUTH_INIT_MAX_ATTEMPTS + 1):
+            self.register._check_cancelled()
+            try:
+                return self._login_to_callback_once(
+                    identity_value=identity_value,
+                    password=password,
+                    totp_secret=totp_secret,
+                    auth_url=auth_url,
+                    expected_state=expected_state,
+                    redirect_uri=redirect_uri,
+                )
+            except ChatGPTCloudflareChallengeError as exc:
+                last_error = exc
+                can_retry = (
+                    attempt < _OAUTH_INIT_MAX_ATTEMPTS
+                    and self.register._session_factory is not None
+                    and callable(self.register.proxy_rotate_callback)
+                    and self.register._rotate_proxy_after_challenge()
+                )
+                if not can_retry:
+                    raise
+                delay = min(
+                    _OAUTH_INIT_RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
+                    _OAUTH_INIT_RETRY_MAX_SECONDS,
+                )
+                self.log(
+                    f"Cloudflare challenge at {exc.stage}; retrying Sub2 OAuth "
+                    f"on a new proxy in {delay:.1f}s "
+                    f"({attempt + 1}/{_OAUTH_INIT_MAX_ATTEMPTS})"
+                )
+                self.register._wait_before_oauth_retry(delay)
+                self.register._replace_owned_session()
+        raise last_error or Sub2ApiLoginError("协议登录失败")
+
+    def _login_to_callback_once(
+        self,
+        *,
+        identity_value: str,
+        password: str,
+        totp_secret: str,
+        auth_url: str,
+        expected_state: str,
+        redirect_uri: str,
+    ) -> str:
         oauth_start = self._oauth_start(
             auth_url=auth_url,
             state=expected_state,

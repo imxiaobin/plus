@@ -20,16 +20,33 @@ function statusClass(status: string) {
   return 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
 }
 
+function sameTaskSnapshot(left: any[], right: any[]) {
+  if (left.length !== right.length) return false
+  return left.every((task, index) => {
+    const other = right[index]
+    return (
+      task.task_id === other.task_id &&
+      task.status === other.status &&
+      task.progress === other.progress &&
+      task.error === other.error &&
+      Boolean(task.terminal) === Boolean(other.terminal) &&
+      Boolean(task.cancellable) === Boolean(other.cancellable)
+    )
+  })
+}
+
 export default function Tasks() {
   const [tasks, setTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     try {
       const data = await apiFetch('/tasks?limit=50')
-      setTasks(Array.isArray(data?.items) ? data.items : [])
+      const next = Array.isArray(data?.items) ? data.items : []
+      setTasks((current) => (sameTaskSnapshot(current, next) ? current : next))
       setError('')
     } catch (err: any) {
       setError(err?.message || '读取任务失败')
@@ -38,11 +55,33 @@ export default function Tasks() {
     }
   }, [])
 
+  const hasRunning = useMemo(() => tasks.some((task) => !task.terminal), [tasks])
+
   useEffect(() => {
     void load()
-    const timer = window.setInterval(() => void load(), 1000)
-    return () => window.clearInterval(timer)
+    const schedule = () => {
+      const hidden = typeof document !== 'undefined' && document.hidden
+      return hidden ? 15000 : hasRunning ? 2500 : 8000
+    }
+    let timer = window.setInterval(() => void load(), schedule())
+    const reschedule = () => {
+      window.clearInterval(timer)
+      timer = window.setInterval(() => void load(), schedule())
+    }
+    document.addEventListener('visibilitychange', reschedule)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', reschedule)
+    }
+  }, [load, hasRunning])
+
+  const handleLogDone = useCallback(() => {
+    void load()
   }, [load])
+
+  const toggleLogs = (taskId: string) => {
+    setExpandedLogs((current) => ({ ...current, [taskId]: !current[taskId] }))
+  }
 
   const stop = async (taskId: string) => {
     setStoppingId(taskId)
@@ -59,40 +98,53 @@ export default function Tasks() {
   const running = useMemo(() => tasks.filter(task => !task.terminal), [tasks])
   const finished = useMemo(() => tasks.filter(task => task.terminal), [tasks])
 
-  const renderTask = (task: any) => (
-    <div key={task.task_id} className="space-y-3 px-4 py-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-[var(--text-primary)]">{TYPE_LABELS[task.type] || task.type}</span>
-            <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ${statusClass(task.status)}`}>
-              {getTaskStatusText(task.status)}
-            </span>
+  const renderTask = (task: any) => {
+    const live = !task.terminal
+    const logsOpen = live || Boolean(expandedLogs[task.task_id])
+    return (
+      <div key={task.task_id} className="space-y-3 px-4 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-[var(--text-primary)]">{TYPE_LABELS[task.type] || task.type}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ${statusClass(task.status)}`}>
+                {getTaskStatusText(task.status)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-[var(--text-secondary)]">
+              <span>进度 <b className="text-[var(--text-primary)]">{task.progress}</b></span>
+              <span className="font-mono text-xs text-[var(--text-muted)]" title={task.task_id}>{task.task_id}</span>
+            </div>
+            {task.error ? (
+              <div className="mt-2 break-all text-sm text-red-300">{task.error}</div>
+            ) : null}
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-[var(--text-secondary)]">
-            <span>进度 <b className="text-[var(--text-primary)]">{task.progress}</b></span>
-            <span className="font-mono text-xs text-[var(--text-muted)]" title={task.task_id}>{task.task_id}</span>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {!live ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => toggleLogs(task.task_id)}>
+                {logsOpen ? '收起日志' : '查看日志'}
+              </Button>
+            ) : null}
+            {task.cancellable ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void stop(task.task_id)}
+                disabled={stoppingId === task.task_id}
+                className="border-red-500/35 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+              >
+                <Square className="mr-2 h-3.5 w-3.5" />
+                {stoppingId === task.task_id ? '停止中…' : '停止任务'}
+              </Button>
+            ) : null}
           </div>
-          {task.error ? (
-            <div className="mt-2 break-all text-sm text-red-300">{task.error}</div>
-          ) : null}
         </div>
-        {task.cancellable ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void stop(task.task_id)}
-            disabled={stoppingId === task.task_id}
-            className="shrink-0 border-red-500/35 text-red-300 hover:bg-red-500/10 hover:text-red-200"
-          >
-            <Square className="mr-2 h-3.5 w-3.5" />
-            {stoppingId === task.task_id ? '停止中…' : '停止任务'}
-          </Button>
+        {logsOpen ? (
+          <TaskLogPanel taskId={task.task_id} compact live={live} onDone={handleLogDone} />
         ) : null}
       </div>
-      <TaskLogPanel taskId={task.task_id} compact onDone={() => void load()} />
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="space-y-5">

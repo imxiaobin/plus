@@ -14,6 +14,7 @@ import Accounts from "@/pages/Accounts";
 import Tasks from "@/pages/Tasks";
 import SettingsPage from "@/pages/SettingsPage";
 import MicrosoftMailboxes from "@/pages/MicrosoftMailboxes";
+import Sub2ApiMonitor from "@/pages/Sub2ApiMonitor";
 import UpdateBanner from "@/components/UpdateBanner";
 import {
   Moon,
@@ -26,6 +27,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   Inbox,
+  Activity,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -51,6 +53,7 @@ const SETTINGS_NAV_ITEMS: { labelKey: TranslationKey; hash: string }[] = [
 
 const NAV_ITEMS: NavItem[] = [
   { path: "/accounts/chatgpt", label: "chatgpt free", icon: Users },
+  { path: "/sub2api", labelKey: "nav.sub2Monitor", icon: Activity },
   { path: "/tasks", label: "任务", icon: ListTodo },
   { path: "/microsoft-mailboxes", label: "微软邮箱", icon: Inbox },
   { path: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
@@ -93,7 +96,7 @@ function Sidebar({
     <aside
       className={cn(
         "flex h-screen flex-col border-r border-[var(--border)] bg-[var(--bg-surface)] transition-[width] duration-200",
-        collapsed ? "w-16" : "w-[220px]",
+        collapsed ? "w-16" : "w-[168px]",
       )}
     >
       {/* Header */}
@@ -263,11 +266,12 @@ function Shell({
         setCollapsed={setCollapsed}
       />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl px-6 py-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[1600px] px-4 py-5 lg:px-6">
           <UpdateBanner />
           <Routes>
             <Route path="/" element={<Navigate to="/accounts/chatgpt" replace />} />
             <Route path="/accounts/chatgpt" element={<Accounts />} />
+            <Route path="/sub2api" element={<Sub2ApiMonitor />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/microsoft-mailboxes" element={<MicrosoftMailboxes />} />
             <Route

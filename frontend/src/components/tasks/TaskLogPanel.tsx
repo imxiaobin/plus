@@ -37,10 +37,12 @@ export function TaskLogPanel({
   taskId,
   onDone,
   compact = false,
+  live = true,
 }: {
   taskId: string;
   onDone?: (status: string) => void;
   compact?: boolean;
+  live?: boolean;
 }) {
   const { t, language } = useI18n();
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -120,6 +122,12 @@ export function TaskLogPanel({
       }
     };
 
+    syncLatestEvents().catch(() => {});
+    if (!live) {
+      doneRef.current = true;
+      return () => {};
+    }
+
     const es = new EventSource(`${API_BASE}/tasks/${taskId}/logs/stream?tail=300`);
     eventSourceRef.current = es;
     es.onopen = () => {
@@ -141,19 +149,13 @@ export function TaskLogPanel({
     };
 
     syncTask().catch(() => {});
-    // A refresh starts from the current tail instead of replaying a long task
-    // from its first event.  The EventSource path handles low-latency updates;
-    // this authenticated fetch is also the fallback when SSE cannot carry a
-    // bearer header.
-    syncLatestEvents().catch(() => {});
-
     // 进度需要持续轮询：SSE 只发 events，progress 在 task model 上，
     // 必须主动 GET /tasks/{id} 拿。原实现里只在 SSE 不健康时轮询，导致
     // SSE 正常时进度从来不更新。
     const progressPoll = window.setInterval(() => {
       if (doneRef.current) return;
       syncTask().catch(() => {});
-    }, 1500);
+    }, 2500);
 
     const fallbackPoll = window.setInterval(async () => {
       if (doneRef.current || sseHealthyRef.current) return;
@@ -167,7 +169,7 @@ export function TaskLogPanel({
       } catch {
         // passive
       }
-    }, 1000);
+    }, 2000);
 
     return () => {
       sseHealthyRef.current = false;
@@ -176,7 +178,7 @@ export function TaskLogPanel({
       window.clearInterval(progressPoll);
       window.clearInterval(fallbackPoll);
     };
-  }, [taskId]);
+  }, [taskId, live]);
 
   // 按 subtaskId 把事件切成分组：主任务 + 每个 worker。
   // 顺序按"首次出现"排，保证 worker 折叠面板顺序稳定（worker_1 / worker_2…）。
