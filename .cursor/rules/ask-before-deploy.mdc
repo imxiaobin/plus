@@ -1,0 +1,14 @@
+---
+description: After any code change, ask whether to deploy. Never deploy automatically.
+alwaysApply: true
+---
+
+# 改完先问是否部署
+
+每次完成本仓库的实现、修复或配置修改后，在回复末尾明确询问用户要不要部署到生产服务器。用户可能还在并行开发多个需求，未完成的改动不应上线。
+
+- 改完代码后先总结改动，再问：「要现在部署吗？还是等其他需求一起上？」
+- 只有用户明确说「部署」「上线」「发布」时，才执行 `abaiautoplus-deploy`。
+- 不要在同一轮改代码后自动 commit、push、ssh 或 `--apply`。
+- 用户说「先不部署」「还有其他需求」「等会再上」时，停在本地改动即可。
+- 纯问答、只读排查、未改仓库文件时，不必追问部署。

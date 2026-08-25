@@ -1,0 +1,4 @@
+interface:
+  display_name: "aBaiAutoplus Deploy"
+  short_description: "Safely release and verify aBaiAutoplus services"
+  default_prompt: "Use $abaiautoplus-deploy to safely deploy the current committed revision to the configured server."
