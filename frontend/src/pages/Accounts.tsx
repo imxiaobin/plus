@@ -112,6 +112,7 @@ function RegisterDialog({ onClose, onCreated }: { onClose: () => void, onCreated
   const [probeOtpTimeout, setProbeOtpTimeout] = useState('90')
   const [banAfter, setBanAfter] = useState('3')
   const [probeBatch, setProbeBatch] = useState('5')
+  const [phoneOtpTimeout, setPhoneOtpTimeout] = useState('180')
   const [harCapture, setHarCapture] = useState(false)
   const [harCapture2fa, setHarCapture2fa] = useState(false)
   const [executorType, setExecutorType] = useState<'protocol' | 'headed' | 'headless'>('protocol')
@@ -174,6 +175,7 @@ function RegisterDialog({ onClose, onCreated }: { onClose: () => void, onCreated
     const numericProbeOtpTimeout = Number(probeOtpTimeout)
     const numericBanAfter = Number(banAfter)
     const numericProbeBatch = Number(probeBatch)
+    const numericPhoneOtpTimeout = Number(phoneOtpTimeout)
     if (
       !Number.isInteger(numericProbeInterval) || numericProbeInterval < 30 ||
       !Number.isInteger(numericProbeOtpTimeout) || numericProbeOtpTimeout < 20 ||
@@ -181,6 +183,10 @@ function RegisterDialog({ onClose, onCreated }: { onClose: () => void, onCreated
       !Number.isInteger(numericProbeBatch) || numericProbeBatch < 1 || numericProbeBatch > 20
     ) {
       setError('脉冲探测参数无效：探测间隔≥30s，验证码超时≥20s，封禁阈值≥1，探测批量 1-20。')
+      return
+    }
+    if (identityMode === 'phone' && (!Number.isInteger(numericPhoneOtpTimeout) || numericPhoneOtpTimeout < 30)) {
+      setError('手机验证码超时必须≥30秒。')
       return
     }
     const useDynamic = proxyMode === 'dynamic' && proxyApiUrl.trim().length > 0
@@ -219,6 +225,7 @@ function RegisterDialog({ onClose, onCreated }: { onClose: () => void, onCreated
             identity_provider: identityMode,
             ...(identityMode === 'mailbox' ? { mail_provider: mailProvider } : { sms_provider: 'herosms' }),
             bind_totp_2fa: true,
+            ...(identityMode === 'phone' ? { otp_timeout: numericPhoneOtpTimeout } : {}),
           },
         }),
       })
@@ -289,9 +296,16 @@ function RegisterDialog({ onClose, onCreated }: { onClose: () => void, onCreated
             </select>
           </label>
           {identityMode === 'phone' ? (
-            <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-300 sm:col-span-2">
-              使用 HeroSMS 取号并接收 OpenAI 短信验证码。不走邮箱服务。请先在设置 → 手机平台配置中填写 API Key，也可继续使用服务器 `.env` 的 `OPAI_HEROSMS_API_KEY`。
-            </div>
+            <>
+              <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-300 sm:col-span-2">
+                使用 HeroSMS 取号并接收 OpenAI 短信验证码。不走邮箱服务。请先在设置 → 手机平台配置中填写 API Key，也可继续使用服务器 `.env` 的 `OPAI_HEROSMS_API_KEY`。
+              </div>
+              <label className="grid gap-1.5 text-sm text-[var(--text-secondary)] sm:col-span-2">
+                手机验证码超时（秒）
+                <input value={phoneOtpTimeout} onChange={event => setPhoneOtpTimeout(event.target.value)} inputMode="numeric" className="rounded-md border border-[var(--border)] bg-transparent px-3 py-2 text-[var(--text-primary)]" />
+                <span className="text-xs text-[var(--text-muted)]">等待 HeroSMS 收到验证码的最长时间，超时后注册任务失败。默认 180 秒。</span>
+              </label>
+            </>
           ) : (
           <label className="grid gap-1.5 text-sm text-[var(--text-secondary)] sm:col-span-2">
             注册邮箱服务

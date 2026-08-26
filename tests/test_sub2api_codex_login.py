@@ -221,6 +221,78 @@ def test_email_login_starts_from_sub2_auth_url_not_local_pkce():
     assert continue_calls[0]["username"]["value"] == "user@example.com"
 
 
+def test_login_retries_follow_authorize_on_transient_curl(monkeypatch):
+    from curl_cffi import CurlECode, CurlError
+
+    session = FakeSession()
+    auth_url = "https://auth.openai.com/oauth/authorize?state=st_email"
+    session.add("GET", "/oauth/authorize", FakeResponse(200, {}, url=auth_url))
+    session.add(
+        "POST",
+        "/api/accounts/authorize/continue",
+        FakeResponse(200, {"page": {"type": "password"}, "continue_url": "/log-in/password"}),
+    )
+    session.add(
+        "POST",
+        "/api/accounts/password/verify",
+        FakeResponse(
+            200,
+            {
+                "page": {"type": "mfa_challenge", "payload": {"factor_id": "factor-mail", "type": "totp"}},
+            },
+        ),
+    )
+    session.add("POST", "/api/accounts/mfa/issue_challenge", FakeResponse(200, {}))
+    session.add(
+        "POST",
+        "/api/accounts/mfa/verify",
+        FakeResponse(200, {"oai-client-auth-session": {"workspaces": [{"id": "ws-mail"}]}}),
+    )
+    session.add(
+        "POST",
+        "/api/accounts/workspace/select",
+        FakeResponse(
+            303,
+            {},
+            headers={"location": "http://localhost:1455/auth/callback?code=ac_email&state=st_email"},
+        ),
+    )
+
+    login = _login(session)
+    login.register._session_factory = lambda: session
+    rotated = []
+    login.register.proxy_rotate_callback = lambda: rotated.append("http://p2") or "http://p2"
+    login.register._replace_owned_session = lambda: rotated.append("replaced")
+    monkeypatch.setattr(login.register, "_wait_before_oauth_retry", lambda _delay: None)
+
+    follows = {"n": 0}
+    real_follow = login.register._follow_authorize_chain
+
+    def flaky_follow(url):
+        follows["n"] += 1
+        if follows["n"] == 1:
+            raise CurlError(
+                "BoringSSL SSL_connect: Connection closed abruptly",
+                CurlECode.SSL_CONNECT_ERROR,
+            )
+        return real_follow(url)
+
+    login.register._follow_authorize_chain = flaky_follow
+    logs = []
+    login.log = logs.append
+    callback = login.login_to_callback(
+        identity="user@example.com",
+        password="Secret123!",
+        totp_secret="JBSWY3DPEHPK3PXP",
+        auth_url=auth_url,
+        expected_state="st_email",
+    )
+    assert follows["n"] == 2
+    assert rotated == ["http://p2", "replaced"]
+    assert "code=ac_email" in callback
+    assert any("curl(35)" in message for message in logs)
+
+
 def test_login_retries_follow_authorize_on_cloudflare(monkeypatch):
     from platforms.chatgpt.protocol_register import ChatGPTCloudflareChallengeError
 

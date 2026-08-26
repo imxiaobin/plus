@@ -10,8 +10,11 @@ Never calls local ``/oauth/token`` or ``submit_callback_url``.
 from __future__ import annotations
 
 import logging
+import random
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
+
+from curl_cffi import CurlError
 
 from platforms.chatgpt.constants import (
     CODEX_CLIENT_ID,
@@ -284,6 +287,30 @@ class Sub2ApiCodexLogin:
                 self.log(
                     f"Cloudflare challenge at {exc.stage}; retrying Sub2 OAuth "
                     f"on a new proxy in {delay:.1f}s "
+                    f"({attempt + 1}/{_OAUTH_INIT_MAX_ATTEMPTS})"
+                )
+                self.register._wait_before_oauth_retry(delay)
+                self.register._replace_owned_session()
+            except CurlError as exc:
+                last_error = exc
+                can_retry = (
+                    attempt < _OAUTH_INIT_MAX_ATTEMPTS
+                    and self.register._session_factory is not None
+                    and self.register._is_transient_curl_error(exc)
+                )
+                if not can_retry:
+                    raise
+                base_delay = min(
+                    _OAUTH_INIT_RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
+                    _OAUTH_INIT_RETRY_MAX_SECONDS,
+                )
+                delay = base_delay * random.uniform(0.8, 1.2)
+                error_code = int(getattr(exc, "code", 0) or 0)
+                if callable(self.register.proxy_rotate_callback):
+                    self.register._rotate_proxy(f"Sub2 OAuth curl({error_code})")
+                self.log(
+                    f"Sub2 OAuth 协议登录遇到瞬时 curl({error_code})；"
+                    f"{delay:.1f}s 后重试 "
                     f"({attempt + 1}/{_OAUTH_INIT_MAX_ATTEMPTS})"
                 )
                 self.register._wait_before_oauth_retry(delay)
