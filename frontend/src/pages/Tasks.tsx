@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Square } from 'lucide-react'
+import { RefreshCw, Square, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { TaskLogPanel } from '@/components/tasks/TaskLogPanel'
@@ -39,6 +39,7 @@ export default function Tasks() {
   const [tasks, setTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
+  const [clearing, setClearing] = useState(false)
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
   const [error, setError] = useState('')
 
@@ -92,6 +93,18 @@ export default function Tasks() {
       setError(err?.message || '停止任务失败')
     } finally {
       setStoppingId(null)
+    }
+  }
+
+  const clearFinished = async () => {
+    setClearing(true)
+    try {
+      await apiFetch('/tasks/clear', { method: 'POST' })
+      await load()
+    } catch (err: any) {
+      setError(err?.message || '清空任务失败')
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -155,9 +168,17 @@ export default function Tasks() {
             运行中 {running.length} 个，最近结束 {finished.length} 个。失败任务也会留在这里，可看日志和原因。
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新
-        </Button>
+        <div className="flex gap-2">
+          {finished.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => void clearFinished()} disabled={clearing}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              {clearing ? '清空中…' : '清空任务'}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新
+          </Button>
+        </div>
       </div>
 
       {error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div> : null}

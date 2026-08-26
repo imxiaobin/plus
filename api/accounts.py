@@ -28,6 +28,10 @@ class AccountUpdateRequest(BaseModel):
     provider_accounts: Optional[list[dict]] = None
     provider_resources: Optional[list[dict]] = None
     replace_provider_accounts: bool = False
+
+
+class BatchAuthorizeRequest(BaseModel):
+    account_ids: list[int] = Field(..., description="账号ID列表")
     replace_provider_resources: bool = False
     primary_token: Optional[str] = None
     cashier_url: Optional[str] = None
@@ -192,7 +196,29 @@ def authorize_account_sub2api(account_id: int):
         require_sub2api_configured()
     except Sub2ApiNotConfiguredError as exc:
         raise HTTPException(400, str(exc)) from exc
-    task = create_sub2api_oauth_task(account_id)
+    task = create_sub2api_oauth_task(account_id=account_id)
+    task_runtime.wake_up()
+    return task
+
+
+@router.post("/batch/authorize/sub2api")
+def batch_authorize_sub2api(body: BatchAuthorizeRequest):
+    """批量授权账号到 Sub2API"""
+    try:
+        require_sub2api_configured()
+    except Sub2ApiNotConfiguredError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if not body.account_ids:
+        raise HTTPException(400, "账号ID列表不能为空")
+
+    # 验证所有账号是否存在
+    for account_id in body.account_ids:
+        item = service.get_account(account_id)
+        if not item:
+            raise HTTPException(404, f"账号 {account_id} 不存在")
+
+    task = create_sub2api_oauth_task(account_ids=body.account_ids)
     task_runtime.wake_up()
     return task
 

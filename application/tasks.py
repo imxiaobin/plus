@@ -10,7 +10,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from core.account_graph import (
     load_account_graphs,
@@ -77,6 +77,7 @@ MAX_REFRESH_TOKEN_CHECK_CONCURRENCY = 200
 DEFAULT_REFRESH_TOKEN_CHECK_CONCURRENCY = 100
 REFRESH_TOKEN_CHECK_ACCOUNT_TIMEOUT_SECONDS = 240
 REFRESH_TOKEN_CHECK_HEARTBEAT_SECONDS = 10
+POST_REGISTER_RECHECK_ENABLED = os.getenv("POST_REGISTER_RECHECK_ENABLED", "1") == "1"
 POST_REGISTER_RECHECK_DELAY_SECONDS = 120
 MAX_TASK_ACCOUNT_SUMMARIES = 200
 MAX_TASK_ERROR_DETAILS = 100
@@ -308,13 +309,33 @@ def create_register_task(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def create_sub2api_oauth_task(account_id: int) -> dict[str, Any]:
-    return create_task(
-        task_type=TASK_TYPE_SUB2API_OAUTH,
-        platform="chatgpt",
-        payload={"account_id": int(account_id)},
-        progress_total=1,
-    )
+def create_sub2api_oauth_task(
+    account_id: int | None = None,
+    account_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """创建 Sub2API OAuth 授权任务。
+
+    Args:
+        account_id: 单个账号ID（兼容旧接口）
+        account_ids: 批量账号ID列表
+    """
+    if account_ids:
+        normalized_ids = sorted({int(aid) for aid in account_ids if int(aid or 0) > 0})
+        return create_task(
+            task_type=TASK_TYPE_SUB2API_OAUTH,
+            platform="chatgpt",
+            payload={"account_ids": normalized_ids},
+            progress_total=len(normalized_ids),
+        )
+    elif account_id:
+        return create_task(
+            task_type=TASK_TYPE_SUB2API_OAUTH,
+            platform="chatgpt",
+            payload={"account_id": int(account_id)},
+            progress_total=1,
+        )
+    else:
+        raise ValueError("必须提供 account_id 或 account_ids")
 
 
 def _bounded_concurrency(value: Any, *, default: int, maximum: int) -> int:
@@ -403,6 +424,25 @@ def list_tasks(*, task_type: str = "", limit: int = 100, active_only: bool = Fal
             statement.order_by(TaskModel.created_at.desc()).limit(limit)
         ).all()
     return [serialize_task(task) for task in tasks]
+
+
+def clear_finished_tasks() -> int:
+    """清空所有已完成的任务（包括成功、失败、取消）。
+
+    Returns:
+        删除的任务数量
+    """
+    with Session(engine) as session:
+        statement = select(TaskModel).where(TaskModel.status.in_(TERMINAL_TASK_STATUSES))
+        tasks = session.exec(statement).all()
+        count = len(tasks)
+        for task in tasks:
+            # 删除任务的所有事件
+            session.exec(delete(TaskEventModel).where(TaskEventModel.task_id == task.task_id))
+            # 删除任务本身
+            session.delete(task)
+        session.commit()
+    return count
 
 
 def list_task_events(task_id: str, *, since: int = 0, limit: int = 200) -> list[dict[str, Any]]:
@@ -1598,6 +1638,13 @@ def _patch_sub2api_overview(account_id: int, updates: dict[str, Any]) -> None:
 def _execute_sub2api_oauth_task(payload: dict[str, Any], logger: TaskLogger) -> None:
     from application.sub2api_oauth import authorize_chatgpt_account_to_sub2api
 
+    # 支持单个账号或批量账号
+    account_ids = payload.get("account_ids")
+    if account_ids:
+        _execute_sub2api_oauth_batch(account_ids, logger)
+        return
+
+    # 单个账号处理（兼容旧逻辑）
     account_id = int(payload.get("account_id", 0) or 0)
     if account_id <= 0:
         logger.finish(TASK_STATUS_FAILED, error="缺少账号 ID")
@@ -1656,6 +1703,91 @@ def _execute_sub2api_oauth_task(payload: dict[str, Any], logger: TaskLogger) -> 
     logger.set_progress(1, 1)
     logger.record_success()
     logger.finish(TASK_STATUS_SUCCEEDED)
+
+
+def _execute_sub2api_oauth_batch(account_ids: list[int], logger: TaskLogger) -> None:
+    """批量执行 Sub2API OAuth 授权。"""
+    from application.sub2api_oauth import authorize_chatgpt_account_to_sub2api
+    from core.proxy_pool import proxy_pool
+
+    total = len(account_ids)
+    logger.set_progress(0, total)
+    logger.log(f"开始批量授权 {total} 个账号到 Sub2API")
+
+    prefer_http_pool = proxy_pool.active_count() > 0
+    if prefer_http_pool:
+        logger.log(
+            f"使用 HTTP 代理池（{proxy_pool.active_count()} 条），"
+            "Cloudflare 挑战时自动换下一条",
+            event_type="progress",
+        )
+
+    success_count = 0
+    failed_count = 0
+    results = []
+
+    for idx, account_id in enumerate(account_ids, 1):
+        if logger.is_cancel_requested():
+            logger.log(f"任务已取消，已处理 {idx - 1}/{total}")
+            logger.finish(TASK_STATUS_CANCELLED, error="任务已取消")
+            return
+
+        logger.log(f"[{idx}/{total}] 正在授权账号 ID: {account_id}")
+        _patch_sub2api_overview(
+            account_id,
+            {
+                "sub2api_authorize_status": "running",
+                "sub2api_authorize_error": "",
+            },
+        )
+
+        try:
+            login_proxy = _resolve_refresh_login_proxy(
+                "",
+                logger=logger,
+                prefer_http_pool=prefer_http_pool,
+            )
+            rotate_callback = proxy_pool.get_next_static if prefer_http_pool else None
+
+            result = authorize_chatgpt_account_to_sub2api(
+                account_id,
+                log_fn=logger.log,
+                cancel_check=logger.is_cancel_requested,
+                proxy=login_proxy,
+                proxy_rotate_callback=rotate_callback,
+            )
+            success_count += 1
+            results.append({"account_id": account_id, "success": True, "result": result})
+            logger.log(f"[{idx}/{total}] 账号 {account_id} 授权成功")
+        except Exception as exc:
+            failed_count += 1
+            error = str(exc).strip() or exc.__class__.__name__
+            _patch_sub2api_overview(
+                account_id,
+                {
+                    "sub2api_authorize_status": "failed",
+                    "sub2api_authorize_error": error[:300],
+                },
+            )
+            results.append({"account_id": account_id, "success": False, "error": error})
+            logger.log(f"[{idx}/{total}] 账号 {account_id} 授权失败: {error}")
+            logger.record_error(f"账号 {account_id}: {error}")
+
+        logger.set_progress(idx, total)
+
+    logger.set_result_data({
+        "total": total,
+        "success": success_count,
+        "failed": failed_count,
+        "results": results,
+    })
+
+    if failed_count > 0:
+        logger.log(f"批量授权完成：成功 {success_count} 个，失败 {failed_count} 个")
+        logger.finish(TASK_STATUS_SUCCEEDED, error=f"部分失败：{failed_count}/{total}")
+    else:
+        logger.log(f"批量授权完成：全部 {success_count} 个账号授权成功")
+        logger.finish(TASK_STATUS_SUCCEEDED)
 
 
 def _execute_platform_action_task(payload: dict[str, Any], logger: TaskLogger) -> None:
@@ -1719,6 +1851,8 @@ def _schedule_post_registration_recheck(
     account_ids: list[int],
 ) -> dict[str, Any] | None:
     """Queue a durable delayed browser check for newly saved accounts."""
+    if not POST_REGISTER_RECHECK_ENABLED:
+        return None
     normalized_ids = sorted(
         {
             int(account_id)

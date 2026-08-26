@@ -9,6 +9,7 @@ from application.tasks import (
     TASK_STATUS_FAILED,
     TASK_STATUS_INTERRUPTED,
     TERMINAL_TASK_STATUSES,
+    clear_finished_tasks,
     create_register_task,
     get_task,
     list_latest_task_events,
@@ -32,6 +33,9 @@ class TaskCommandsService:
         if task:
             task_runtime.wake_up()
         return task
+
+    def clear_finished_tasks(self) -> int:
+        return clear_finished_tasks()
 
     async def stream_task_events(self, task_id: str, *, since: int = 0, tail: int = 300) -> AsyncIterator[str]:
         cursor = since

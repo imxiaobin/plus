@@ -97,12 +97,12 @@ function RegisterDialog({ onClose, onCreated }: { onClose: () => void, onCreated
   const [proxyNodes, setProxyNodes] = useState<ProxyNode[]>([])
   const [proxyLoading, setProxyLoading] = useState(false)
   const [proxyError, setProxyError] = useState('')
-  const [proxyMode, setProxyMode] = useState<'pool' | 'http_pool' | 'dynamic' | 'direct'>('pool')
+  const [proxyMode, setProxyMode] = useState<'pool' | 'http_pool' | 'dynamic' | 'direct'>('http_pool')
   const [proxyApiUrl, setProxyApiUrl] = useState('')
   const [httpProxyActive, setHttpProxyActive] = useState(0)
   const [mailProvider, setMailProvider] = useState('')
   const [mailProviders, setMailProviders] = useState<Array<any>>([])
-  const [identityMode, setIdentityMode] = useState<'mailbox' | 'phone'>('mailbox')
+  const [identityMode, setIdentityMode] = useState<'mailbox' | 'phone'>('phone')
   const [splitRegister, setSplitRegister] = useState(true)
   const [harAvailable, setHarAvailable] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -624,27 +624,24 @@ export default function Accounts() {
     }
     setBatchAuthorizingAll(true)
     setError('')
-    let successCount = 0
-    let failCount = 0
-    for (const account of unauthorizedAccounts) {
-      try {
-        await apiFetch(`/accounts/${account.id}/authorize/sub2api`, { method: 'POST' })
-        successCount++
-      } catch (err: any) {
-        failCount++
-        console.error(`授权账号 ${account.email} 失败:`, err)
-      }
-      await new Promise(resolve => setTimeout(resolve, 200))
-    }
-    setBatchAuthorizingAll(false)
-    await load({ quiet: true })
-    if (failCount > 0) {
-      setError(`批量授权完成：成功 ${successCount} 个，失败 ${failCount} 个`)
-    } else {
-      setCreatedTask({
-        id: '',
-        title: `批量授权成功：${successCount} 个账号已开始授权`,
+    try {
+      const task = await apiFetch('/accounts/batch/authorize/sub2api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account_ids: unauthorizedAccounts.map(a => a.id),
+        }),
       })
+      setCreatedTask({
+        id: task.id,
+        title: `批量授权：${unauthorizedAccounts.length} 个账号`,
+      })
+    } catch (err: any) {
+      setError(`批量授权失败: ${err.message || String(err)}`)
+      console.error('批量授权失败:', err)
+    } finally {
+      setBatchAuthorizingAll(false)
+      await load({ quiet: true })
     }
   }
 
