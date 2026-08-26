@@ -75,6 +75,13 @@ function Sidebar({
   const isSettings = location.pathname === "/settings";
   const currentTab = new URLSearchParams(location.search).get("tab") || "general";
 
+  // 进入设置页面时自动展开侧边栏
+  useEffect(() => {
+    if (isSettings && collapsed) {
+      setCollapsed(false);
+    }
+  }, [isSettings, collapsed, setCollapsed]);
+
   const navLinkClass = (active: boolean) =>
     cn(
       "group flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",

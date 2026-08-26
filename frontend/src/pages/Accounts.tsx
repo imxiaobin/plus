@@ -526,6 +526,7 @@ export default function Accounts() {
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [authorizingId, setAuthorizingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [batchAuthorizingAll, setBatchAuthorizingAll] = useState(false)
 
   const authorizeAccount = async (account: AccountListItem) => {
     if (account.sub2api_authorize_status === 'running' || authorizingId === account.id) return
@@ -596,7 +597,6 @@ export default function Accounts() {
 
   const deleteAccount = async (account: AccountListItem) => {
     if (deletingId === account.id) return
-    if (!window.confirm(`确定删除账号 ${account.email}？此操作不可撤销。`)) return
     setDeletingId(account.id)
     setError('')
     try {
@@ -610,6 +610,41 @@ export default function Accounts() {
       setError(err?.message || '删除账号失败')
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const batchAuthorizeAll = async () => {
+    if (batchAuthorizingAll) return
+    const unauthorizedAccounts = accounts.filter(
+      account => !account.sub2api_authorized && account.sub2api_authorize_status !== 'running'
+    )
+    if (unauthorizedAccounts.length === 0) {
+      setError('当前页面没有需要授权的账号')
+      return
+    }
+    setBatchAuthorizingAll(true)
+    setError('')
+    let successCount = 0
+    let failCount = 0
+    for (const account of unauthorizedAccounts) {
+      try {
+        await apiFetch(`/accounts/${account.id}/authorize/sub2api`, { method: 'POST' })
+        successCount++
+      } catch (err: any) {
+        failCount++
+        console.error(`授权账号 ${account.email} 失败:`, err)
+      }
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    setBatchAuthorizingAll(false)
+    await load({ quiet: true })
+    if (failCount > 0) {
+      setError(`批量授权完成：成功 ${successCount} 个，失败 ${failCount} 个`)
+    } else {
+      setCreatedTask({
+        id: '',
+        title: `批量授权成功：${successCount} 个账号已开始授权`,
+      })
     }
   }
 
@@ -657,6 +692,10 @@ export default function Accounts() {
             <Button size="sm" variant="outline" disabled={Boolean(runningAction)} onClick={() => void createRefreshCheckTask(true)} title="先用 Camoufox 并行验活，失活账号再用协议登录恢复 AT">
               <ShieldCheck className="mr-1.5 h-4 w-4" />
               {runningAction === 'refresh_browser' ? '创建中…' : '401 验活'}
+            </Button>
+            <Button size="sm" variant="outline" disabled={batchAuthorizingAll} onClick={() => void batchAuthorizeAll()} title="批量授权当前页面所有未授权的账号到 Sub2API">
+              <ShieldCheck className="mr-1.5 h-4 w-4" />
+              {batchAuthorizingAll ? '批量授权中…' : '批量授权'}
             </Button>
             <Button size="sm" onClick={() => setShowRegister(true)}>
               <Plus className="mr-1.5 h-4 w-4" />协议注册
