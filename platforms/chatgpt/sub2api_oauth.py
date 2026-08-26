@@ -692,6 +692,16 @@ class Sub2ApiOAuthClient:
         logger.info("Sub2API 更新账号凭据 id=%s", account_id)
         return payload if isinstance(payload, dict) else {"raw": payload}
 
+    def enable_account(self, account_id: int) -> dict[str, Any]:
+        """启用 Sub2API 账号。"""
+        payload = self._request(
+            "PUT",
+            UPDATE_ACCOUNT_PATH.format(account_id=int(account_id)),
+            {"status": "active"},
+        )
+        logger.info("Sub2API 启用账号 id=%s", account_id)
+        return payload if isinstance(payload, dict) else {"raw": payload}
+
     def batch_today_stats(self, account_ids: list[int]) -> dict[str, dict[str, Any]]:
         ids = [int(item) for item in account_ids if str(item).strip()]
         if not ids:

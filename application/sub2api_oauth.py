@@ -583,6 +583,12 @@ def authorize_chatgpt_account_to_sub2api(
             applied = oauth_client.apply_oauth_credentials(remote_id, tokens)
             sub2_account_id = extract_sub2api_account_id(applied) or existing_id
             reused = True
+            # 重新授权后启用账号
+            try:
+                oauth_client.enable_account(remote_id)
+                log(f"已启用 Sub2API 账号 {existing_id}")
+            except Exception as e:
+                log(f"启用账号失败: {e}")
     if not reused:
         log("在 Sub2API 创建 oauth 账号")
         created = oauth_client.create_oauth_account(tokens, name=identity)
